@@ -8,8 +8,6 @@ using namespace Microsoft::WRL; //ComPtr
 #include "mdk/Player.h"
 using namespace MDK_NS;
 
-#define USE_TEX_RENDER
-
 #define MS_ENSURE(f, ...) MS_CHECK(f, return __VA_ARGS__;)
 #define MS_WARN(f) MS_CHECK(f)
 #define MS_CHECK(f, ...)  do { \
@@ -43,8 +41,6 @@ public:
     setLogHandler(nullptr);
 
     obs_enter_graphics();
-    if (!texrender_)
-      gs_texture_destroy(tex_);
     gs_texrender_destroy(texrender_);
     obs_leave_graphics();
   }
@@ -52,7 +48,6 @@ public:
   gs_texture_t* ensureRTV() {
     if (w_ <= 0 || h_ <= 0)
       return nullptr;
-#ifdef USE_TEX_RENDER
     gs_texrender_reset(texrender_);
     if (!gs_texrender_begin(texrender_, w_, h_)) {
       blog(LOG_ERROR, "failed to begin texrender");
@@ -62,12 +57,6 @@ public:
     if (tex == tex_)
       return tex_;
     tex_ = tex;
-#else
-    if (tex_ && gs_texture_get_width(tex_) == w_ && gs_texture_get_height(tex_) == h_)
-      return tex_;
-    gs_texture_destroy(tex_);
-    tex_ = gs_texture_create(w_, h_, GS_RGBA, 1, nullptr, GS_RENDER_TARGET);
-#endif
     if (!tex_)
       return nullptr;
 
@@ -92,9 +81,7 @@ public:
 
   void render() {
     player_.renderVideo();
-#ifdef USE_TEX_RENDER
     gs_texrender_end(texrender_);
-#endif
   }
 
   void play(const char* url) {
@@ -113,6 +100,7 @@ public:
 private:
   obs_source_t* source_ = nullptr;
   gs_texture_t* tex_ = nullptr;
+  // required by opengl. d3d11 can simply use a texture as rtv, but opengl needs gl api calls here, which is not trival to support all cases because glx or egl used by obs is unknown(mdk does know that)
   gs_texrender_t* texrender_ = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
   uint32_t w_ = 0;
   uint32_t h_ = 0;
