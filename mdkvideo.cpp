@@ -1,5 +1,3 @@
-#include <stdlib.h>
-#include <util/dstr.h>
 #include <obs-module.h>
 #ifdef _WIN32
 #include <Windows.h>
@@ -86,8 +84,9 @@ public:
       player_.setRenderAPI(&ra);
     }
 #endif
+    if (gs_get_device_type() == GS_DEVICE_OPENGL)
+      player_.scale(1.0f, -1.0f); // flip y in fbo
     player_.setVideoSurfaceSize(w_, h_);
-    player_.setBackgroundColor(1.0, 0, 0, 1.0);
     return tex_;
   }
 
