@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
 project(mdk-video)
+include_directories(include)
+link_directories(lib/x86 lib/x64 lib)
 
-find_package(LibObs QUIET)
+if(${CMAKE_PROJECT_NAME} STREQUAL ${PROJECT_NAME})
+else()
+	find_package(LibObs QUIET)
+endif()
 
 set(mdk-video_SOURCES
 	plugin.c
@@ -16,4 +21,4 @@ target_link_libraries(mdk-video
 	mdk
 	)
 
-#install_obs_plugin_with_data(mdk-video data)
+install_obs_plugin_with_data(mdk-video data)
