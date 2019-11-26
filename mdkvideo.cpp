@@ -62,6 +62,7 @@ public:
 
 #ifdef _WIN32
     if (gs_get_device_type() == GS_DEVICE_DIRECT3D_11) {
+      flip_ = 0;
       tex11_ = (ID3D11Texture2D*)gs_texture_get_obj(tex_);
       ComPtr<ID3D11Device> dev11;
       tex11_->GetDevice(&dev11);
@@ -73,8 +74,6 @@ public:
       player_.setRenderAPI(&ra);
     }
 #endif
-    if (gs_get_device_type() == GS_DEVICE_OPENGL)
-      player_.scale(1.0f, -1.0f); // flip y in fbo
     player_.setVideoSurfaceSize(w_, h_);
     return tex_;
   }
@@ -95,6 +94,7 @@ public:
 
   uint32_t width() const { return w_; }
   uint32_t height() const { return h_; }
+  uint32_t flip() const { return flip_; }
 
   Player player_;
 private:
@@ -102,6 +102,7 @@ private:
   gs_texture_t* tex_ = nullptr;
   // required by opengl. d3d11 can simply use a texture as rtv, but opengl needs gl api calls here, which is not trival to support all cases because glx or egl used by obs is unknown(mdk does know that)
   gs_texrender_t* texrender_ = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+  uint32_t flip_ = GS_FLIP_V;
   uint32_t w_ = 0;
   uint32_t h_ = 0;
 
@@ -115,7 +116,7 @@ private:
 
 /* ------------------------------------------------------------------------- */
 
-static const char* mdkvideo_getname(void* data)
+static const char* mdkvideo_getname(void*)
 {
   return "MDKVideo";
 }
@@ -172,7 +173,7 @@ static obs_properties_t* mdkvideo_properties(void* data)
 {
   auto obj = static_cast<mdkVideoSource*>(data);
   auto* props = obs_properties_create();
-  auto p = obs_properties_add_list(props, "gpudecoder", "GPU Video Decoder", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+  auto p = obs_properties_add_list(props, "gpudecoder", obs_module_text("GPUDecoder"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
   obs_property_list_add_string(p, "None", "FFmpeg");
 #if defined(_WIN32)
   obs_property_list_add_string(p, "D3D11 via MFT", "MFT:d3d=11");
@@ -186,7 +187,7 @@ static obs_properties_t* mdkvideo_properties(void* data)
   obs_property_list_add_string(p, "VDPAU", "VDPAU");
 #endif
   obs_property_list_add_string(p, "CUDA", "CUDA");
-  obs_property_list_add_string(p, "NVDEC via FFmpeg", "NVDEC");
+  obs_property_list_add_string(p, "NVDEC", "NVDEC");
   obs_properties_add_path(props, "local_file", obs_module_text("LocalFile"), OBS_PATH_FILE, nullptr, nullptr);
   obs_properties_add_bool(props, "looping", obs_module_text("Looping"));
   auto prop = obs_properties_add_int_slider(props, "speed_percent", obs_module_text("SpeedPercentage"), 1, kMaxSpeedPercent, 1);
@@ -206,21 +207,17 @@ static void mdkvideo_render(void* data, gs_effect_t* effect)
   if (!tex)
     return;
   obj->render();
-  effect = obs_get_base_effect(OBS_EFFECT_OPAQUE); // OBS_EFFECT_DEFAULT ??
 
-  gs_technique_t* tech = gs_effect_get_technique(effect, "Draw");
-  gs_eparam_t* image = gs_effect_get_param_by_name(effect, "image");
-  gs_effect_set_texture(image, tex);
-  auto passes = gs_technique_begin(tech);
-  for (size_t i = 0; i < passes; i++) {
-    if (gs_technique_begin_pass(tech, i)) {
-      gs_draw_sprite(tex, 0, 0, 0);
-      gs_technique_end_pass(tech);
-    }
+  if (effect) { // if no OBS_SOURCE_CUSTOM_DRAW
+    gs_effect_set_texture(gs_effect_get_param_by_name(effect, "image"), tex);
+    gs_draw_sprite(tex, obj->flip(), obj->width(), obj->height());
+  } else {
+    effect = obs_get_base_effect(OBS_EFFECT_OPAQUE);
+    gs_eparam_t *image =gs_effect_get_param_by_name(effect, "image");
+    gs_effect_set_texture(image, tex);
+    while (gs_effect_loop(effect, "Draw"))
+      gs_draw_sprite(tex, obj->flip(), 0, 0);
   }
-  gs_technique_end(tech);
-
-  UNUSED_PARAMETER(effect);
 }
 
 extern "C" void register_mdkvideo()
