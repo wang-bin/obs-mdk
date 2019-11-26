@@ -26,7 +26,7 @@ class mdkVideoSource {
 public:
   mdkVideoSource(obs_source_t* src) : source_(src) {
     setLogHandler([](LogLevel, const char* msg) {
-      blog(LOG_INFO, msg);
+      blog(LOG_INFO, "%s", msg);
       });
     player_.onMediaStatusChanged([this](MediaStatus s) {
       if (flags_added(status_, s, MediaStatus::Loaded)) {
@@ -186,10 +186,17 @@ static obs_properties_t* mdkvideo_properties(void* data)
   auto* props = obs_properties_create();
   auto p = obs_properties_add_list(props, "gpudecoder", "GPU Video Decoder", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
   obs_property_list_add_string(p, "None", "FFmpeg");
+#if defined(_WIN32)
   obs_property_list_add_string(p, "D3D11 via MFT", "MFT:d3d=11");
   obs_property_list_add_string(p, "DXVA via MFT", "MFT:d3d=11");
-  obs_property_list_add_string(p, "D3D11 via FFmpeg", "D3D11");
-  obs_property_list_add_string(p, "DXVA via FFmpeg", "DXVA");
+  obs_property_list_add_string(p, "D3D11", "D3D11");
+  obs_property_list_add_string(p, "DXVA", "DXVA");
+#elif defined(__APPLE__)
+  obs_property_list_add_string(p, "VideoToolbox", "VideoToolbox");
+#else
+  obs_property_list_add_string(p, "VA-API", "VAAPI");
+  obs_property_list_add_string(p, "VDPAU", "VDPAU");
+#endif
   obs_property_list_add_string(p, "CUDA", "CUDA");
   obs_property_list_add_string(p, "NVDEC via FFmpeg", "NVDEC");
   obs_properties_add_path(props, "local_file", obs_module_text("LocalFile"), OBS_PATH_FILE, nullptr, nullptr);
