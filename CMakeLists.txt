@@ -4,7 +4,6 @@ include_directories(include)
 link_directories(lib/x86 lib/x64 lib)
 
 if(${CMAKE_PROJECT_NAME} STREQUAL ${PROJECT_NAME})
-else()
 	find_package(LibObs QUIET)
 endif()
 
@@ -21,4 +20,6 @@ target_link_libraries(mdk-video
 	mdk
 	)
 
-install_obs_plugin_with_data(mdk-video data)
+if(NOT ${CMAKE_PROJECT_NAME} STREQUAL ${PROJECT_NAME})
+    install_obs_plugin_with_data(mdk-video data)
+endif()
