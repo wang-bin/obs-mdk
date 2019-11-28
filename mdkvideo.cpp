@@ -45,42 +45,13 @@ public:
     obs_leave_graphics();
   }
 
-  gs_texture_t* ensureRTV() {
-    if (w_ <= 0 || h_ <= 0)
-      return nullptr;
-    gs_texrender_reset(texrender_);
-    if (!gs_texrender_begin(texrender_, w_, h_)) {
-      blog(LOG_ERROR, "failed to begin texrender");
-      return nullptr;
-    }
-    auto tex = gs_texrender_get_texture(texrender_);
-    if (tex == tex_)
-      return tex_;
-    tex_ = tex;
-    if (!tex_)
-      return nullptr;
 
-#ifdef _WIN32
-    if (gs_get_device_type() == GS_DEVICE_DIRECT3D_11) {
-      flip_ = 0;
-      tex11_ = (ID3D11Texture2D*)gs_texture_get_obj(tex_);
-      ComPtr<ID3D11Device> dev11;
-      tex11_->GetDevice(&dev11);
-      MS_ENSURE(dev11->CreateRenderTargetView(tex11_.Get(), nullptr, &rtv11_), nullptr);
-      dev11->GetImmediateContext(&ctx11_);
-      D3D11RenderAPI ra;
-      ra.context = ctx11_.Get();
-      ra.rtv = rtv11_.Get();
-      player_.setRenderAPI(&ra);
-    }
-#endif
-    player_.setVideoSurfaceSize(w_, h_);
-    return tex_;
-  }
-
-  void render() {
+  gs_texture_t* render() {
+    if (!ensureRTV())
+      return nullptr;
     player_.renderVideo();
     gs_texrender_end(texrender_);
+    return tex_;
   }
 
   void play(const char* url) {
@@ -98,6 +69,38 @@ public:
 
   Player player_;
 private:
+  bool ensureRTV() {
+    if (w_ <= 0 || h_ <= 0)
+      return false;
+    gs_texrender_reset(texrender_);
+    if (!gs_texrender_begin(texrender_, w_, h_)) {
+      blog(LOG_ERROR, "failed to begin texrender");
+      return false;
+    }
+    auto tex = gs_texrender_get_texture(texrender_);
+    if (tex == tex_)
+      return tex_;
+    tex_ = tex;
+    if (!tex_)
+      return false;
+#ifdef _WIN32
+    if (gs_get_device_type() == GS_DEVICE_DIRECT3D_11) {
+      flip_ = 0;
+      tex11_ = (ID3D11Texture2D*)gs_texture_get_obj(tex_);
+      ComPtr<ID3D11Device> dev11;
+      tex11_->GetDevice(&dev11);
+      MS_ENSURE(dev11->CreateRenderTargetView(tex11_.Get(), nullptr, &rtv11_), nullptr);
+      dev11->GetImmediateContext(&ctx11_);
+      D3D11RenderAPI ra;
+      ra.context = ctx11_.Get();
+      ra.rtv = rtv11_.Get();
+      player_.setRenderAPI(&ra);
+    }
+#endif
+    player_.setVideoSurfaceSize(w_, h_);
+    return true;
+  }
+
   obs_source_t* source_ = nullptr;
   gs_texture_t* tex_ = nullptr;
   // required by opengl. d3d11 can simply use a texture as rtv, but opengl needs gl api calls here, which is not trival to support all cases because glx or egl used by obs is unknown(mdk does know that)
@@ -203,11 +206,9 @@ static void mdkvideo_tick(void* data, float seconds)
 static void mdkvideo_render(void* data, gs_effect_t* effect)
 {
   auto obj = static_cast<mdkVideoSource*>(data);
-  auto tex = obj->ensureRTV();
+  auto tex = obj->render();
   if (!tex)
     return;
-  obj->render();
-
   if (effect) { // if no OBS_SOURCE_CUSTOM_DRAW
     gs_effect_set_texture(gs_effect_get_param_by_name(effect, "image"), tex);
     gs_draw_sprite(tex, obj->flip(), obj->width(), obj->height());
