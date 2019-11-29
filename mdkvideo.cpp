@@ -226,7 +226,7 @@ extern "C" void register_mdkvideo()
   static obs_source_info info;
   info.id = "mdkvideo";
   info.type = OBS_SOURCE_TYPE_INPUT;
-  info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW;
+  info.output_flags = OBS_SOURCE_VIDEO;// | OBS_SOURCE_CUSTOM_DRAW;
   info.get_name = mdkvideo_getname;
   info.create = mdkvideo_create;
   info.destroy = mdkvideo_destroy;
