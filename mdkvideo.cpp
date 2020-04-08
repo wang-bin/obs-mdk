@@ -1,4 +1,5 @@
 #include <obs-module.h>
+#include <util/platform.h>
 #ifdef _WIN32
 #include <Windows.h>
 #include <d3d11.h>
@@ -7,6 +8,30 @@ using namespace Microsoft::WRL; //ComPtr
 #endif
 #include "mdk/Player.h"
 using namespace MDK_NS;
+#include <list>
+using namespace std;
+
+#define S_PLAYLIST "playlist"
+#define S_LOOP "loop"
+#define S_SHUFFLE "shuffle"
+
+#define T_(text) obs_module_text(text)
+#define T_PLAYLIST T_("Playlist")
+#define T_LOOP T_("LoopPlaylist")
+#define T_SHUFFLE T_("shuffle")
+
+#define EXTENSIONS_VIDEO                                                       \
+	"*.3gp *.3gpp *.asf *.avi;"                         \
+	"*.dv *.evo *.f4v *.flv;"   \
+	"*.m2v *.m2t *.m2ts *.m4v *.mkv *.mov *.mp2 *.mp2v *.mp4;" \
+	"*.mp4v *.mpeg *.mpg *.mts;"      \
+	"*.mtv *.mxf *.nsv *.nuv *.ogg *.ogm *.ogv;"    \
+	"*.rm *.rmvb *.ts *.vob *.webm *.wm *.wmv"
+
+#define EXTENSIONS_PLAYLIST "*.cue *.m3u *.m3u8 *.pls;"
+
+#define EXTENSIONS_MEDIA \
+	EXTENSIONS_VIDEO " " EXTENSIONS_PLAYLIST
 
 #define MS_ENSURE(f, ...) MS_CHECK(f, return __VA_ARGS__;)
 #define MS_WARN(f) MS_CHECK(f)
@@ -23,6 +48,7 @@ constexpr int kMaxSpeedPercent = 400;
 class mdkVideoSource {
 public:
   mdkVideoSource(obs_source_t* src) : source_(src) {
+	  next_it_ = urls_.cend();
     setLogHandler([](LogLevel, const char* msg) {
       blog(LOG_INFO, "%s", msg);
       });
@@ -36,6 +62,18 @@ public:
       status_ = s;
       return true;
       });
+    player_.currentMediaChanged([this] {
+	    if (!player_.url())
+		    return;
+	    if (next_it_ == urls_.cend()) {
+		    if (!loop_)
+			    return;
+		    next_it_ = urls_.cbegin();
+	    }
+	    player_.setNextMedia(next_it_->data());
+	    std::advance(next_it_, 1);
+    });
+
 	player_.onStateChanged([this](State s) {
 		if (s == State::Stopped)
 			obs_source_media_stop(source_);
@@ -62,7 +100,6 @@ public:
     obs_leave_graphics();
   }
 
-
   gs_texture_t* render() {
     if (!ensureRTV())
       return nullptr;
@@ -83,6 +120,35 @@ public:
   uint32_t width() const { return w_; }
   uint32_t height() const { return h_; }
   uint32_t flip() const { return flip_; }
+
+  void setUrls(const list<string> &urls, bool loop)
+  {
+	  loop_ = loop;
+	  urls_ = urls;
+	  player_.setNextMedia(nullptr);
+	  if (urls_.empty())
+		  return;
+	  string next;
+	  auto now = player_.url();
+	  if (!now) {
+		  next_it_ = urls_.cbegin();
+		  if (++next_it_ == urls_.cend() && loop_)
+			  next_it_ = urls_.cbegin();
+		  play(urls_.front().data());
+		  return;
+	  }
+	  auto it = find(urls_.cbegin(), urls_.cend(), now);
+	  if (it == urls_.cend()) {
+		  if (!loop_) {
+			  player_.setNextMedia(nullptr);
+			  return;
+		  }
+		  next_it_ = urls_.cbegin();
+	  } else {
+		  next_it_ = ++it;
+	  }
+	  player_.setNextMedia(next_it_->data());
+  }
 
   Player player_;
 private:
@@ -145,6 +211,8 @@ private:
 		  obs_source_media_stop(c->source_);
   }
 
+  bool loop_ = true;
+
   obs_source_t *source_ = nullptr;
   gs_texture_t *tex_ = nullptr;
   // required by opengl. d3d11 can simply use a texture as rtv, but opengl needs gl api calls here, which is not trival to support all cases because glx or egl used by obs is unknown(mdk does know that)
@@ -165,6 +233,9 @@ private:
   obs_hotkey_id stop_hotkey;
   obs_hotkey_id playlist_next_hotkey;
   obs_hotkey_id playlist_prev_hotkey;
+
+  mutable list<string>::const_iterator next_it_;
+  list<string> urls_;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -177,18 +248,38 @@ static const char* mdkvideo_getname(void*)
 static void mdkvideo_update(void* data, obs_data_t* settings)
 {
   auto obj = static_cast<mdkVideoSource*>(data);
-  const char* url = obs_data_get_string(settings, "local_file");
+  //const char* url = obs_data_get_string(settings, "local_file");
   bool loop = obs_data_get_bool(settings, "looping");
   auto speed_percent = (int)obs_data_get_int(settings, "speed_percent");
   if (speed_percent < 1 || speed_percent > kMaxSpeedPercent)
     speed_percent = 100;
-  obj->player_.setLoop(loop ? -1 : 0);
+  //obj->player_.setLoop(loop ? -1 : 0);
   obj->player_.setPlaybackRate(float(speed_percent) / 100.0f);
   auto dec = obs_data_get_string(settings, "gpudecoder");
   obj->player_.setVideoDecoders({ dec, "FFmpeg" });
-  auto oldUrl = obj->player_.url();
-  if (!oldUrl || strcmp(oldUrl, url) != 0)
-    obj->play(url);
+
+  auto urls = obs_data_get_array(settings, S_PLAYLIST);
+  auto nb_urls = obs_data_array_count(urls);
+  list<string> new_urls;
+  for (size_t i = 0; i < nb_urls; i++) {
+		obs_data_t *item = obs_data_array_item(urls, i);
+		string p = obs_data_get_string(item, "value");
+		auto dir = os_opendir(p.data());
+		if (dir) {
+			for (auto ent = os_readdir(dir); ent; ent = os_readdir(dir)) {
+				if (ent->directory)
+					continue;
+				auto ext = os_get_path_extension(ent->d_name);
+				if (strstr(EXTENSIONS_MEDIA, ext))
+					new_urls.push_back(p + "/" + ent->d_name);
+			}
+			os_closedir(dir);
+		} else {
+			new_urls.push_back(p);
+		}
+		obs_data_release(item);
+	}
+	obj->setUrls(new_urls, loop);
 }
 
 static void* mdkvideo_create(obs_data_t* settings, obs_source_t* source)
@@ -218,7 +309,7 @@ static uint32_t mdkvideo_height(void* data)
 
 static void mdkvideo_defaults(obs_data_t* settings)
 {
-  obs_data_set_default_bool(settings, "looping", false);
+  obs_data_set_default_bool(settings, "looping", true);
   obs_data_set_default_int(settings, "speed_percent", 100);
 }
 
@@ -240,10 +331,15 @@ static obs_properties_t* mdkvideo_properties(void* data)
 #endif
   obs_property_list_add_string(p, "CUDA", "CUDA");
   obs_property_list_add_string(p, "NVDEC", "NVDEC");
-  obs_properties_add_path(props, "local_file", obs_module_text("LocalFile"), OBS_PATH_FILE, nullptr, nullptr);
+  //obs_properties_add_path(props, "local_file", obs_module_text("LocalFile"), OBS_PATH_FILE, nullptr, nullptr);
   obs_properties_add_bool(props, "looping", obs_module_text("Looping"));
   auto prop = obs_properties_add_int_slider(props, "speed_percent", obs_module_text("SpeedPercentage"), 1, kMaxSpeedPercent, 1);
   obs_property_int_set_suffix(prop, "%");
+
+  auto filters = string("MediaFiles (") + EXTENSIONS_MEDIA + ")";
+  obs_properties_add_editable_list(props, S_PLAYLIST, T_PLAYLIST,
+				   OBS_EDITABLE_LIST_TYPE_FILES_AND_URLS,
+				   filters.data(), nullptr);
   return props;
 }
 
@@ -279,6 +375,7 @@ static void mdkvideo_play_pause(void *data, bool pause)
 static void mdkvideo_stop(void *data)
 {
 	auto obj = static_cast<mdkVideoSource *>(data);
+	obj->player_.setNextMedia(nullptr);
 	obj->player_.setState(State::Stopped);
 }
 
