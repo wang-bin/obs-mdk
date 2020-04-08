@@ -31,10 +31,27 @@ public:
         auto info = player_.mediaInfo();
         w_ = info.video[0].codec.width;
         h_ = info.video[0].codec.height;
+	obs_source_media_started(source_);
       }
       status_ = s;
       return true;
       });
+	player_.onStateChanged([this](State s) {
+		if (s == State::Stopped)
+			obs_source_media_stop(source_);
+	});
+
+	play_pause_hotkey = obs_hotkey_register_source(
+		source_, "MDKVideoSource.PlayPause", obs_module_text("PlayPause"),
+		hotkeyPlayPause, this);
+
+	restart_hotkey = obs_hotkey_register_source(
+		source_, "MDKVideoSource.Restart", obs_module_text("Restart"),
+		hotkeyRestart, this);
+
+	stop_hotkey = obs_hotkey_register_source(source_, "MDKVideoSource.Stop",
+		obs_module_text("Stop"),
+		hotkeyStop, this);
   }
 
   ~mdkVideoSource() {
@@ -101,8 +118,35 @@ private:
     return true;
   }
 
-  obs_source_t* source_ = nullptr;
-  gs_texture_t* tex_ = nullptr;
+  
+  static void hotkeyPlayPause(void *data, obs_hotkey_id, obs_hotkey_t *, bool pressed)
+  {
+	  auto c = static_cast<mdkVideoSource *>(data);
+	  auto state = obs_source_media_get_state(c->source_);
+	  if (pressed && obs_source_active(c->source_)) {
+		  if (state == OBS_MEDIA_STATE_PLAYING)
+			  obs_source_media_play_pause(c->source_, true);
+		  else if (state == OBS_MEDIA_STATE_PAUSED)
+			  obs_source_media_play_pause(c->source_, false);
+	  }
+  }
+
+  static void hotkeyRestart(void *data, obs_hotkey_id, obs_hotkey_t*, bool pressed)
+  {
+	  auto c = static_cast<mdkVideoSource *>(data);
+	  if (pressed && obs_source_active(c->source_))
+		  obs_source_media_restart(c->source_);
+  }
+
+  static void hotkeyStop(void *data, obs_hotkey_id, obs_hotkey_t *, bool pressed)
+  {
+	  auto c = static_cast<mdkVideoSource *>(data);
+	  if (pressed && obs_source_active(c->source_))
+		  obs_source_media_stop(c->source_);
+  }
+
+  obs_source_t *source_ = nullptr;
+  gs_texture_t *tex_ = nullptr;
   // required by opengl. d3d11 can simply use a texture as rtv, but opengl needs gl api calls here, which is not trival to support all cases because glx or egl used by obs is unknown(mdk does know that)
   gs_texrender_t* texrender_ = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
   uint32_t flip_ = GS_FLIP_V;
@@ -115,6 +159,12 @@ private:
   ComPtr<ID3D11RenderTargetView> rtv11_;
 #endif
   MediaStatus status_;
+
+  obs_hotkey_id play_pause_hotkey;
+  obs_hotkey_id restart_hotkey;
+  obs_hotkey_id stop_hotkey;
+  obs_hotkey_id playlist_next_hotkey;
+  obs_hotkey_id playlist_prev_hotkey;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -174,7 +224,6 @@ static void mdkvideo_defaults(obs_data_t* settings)
 
 static obs_properties_t* mdkvideo_properties(void* data)
 {
-  auto obj = static_cast<mdkVideoSource*>(data);
   auto* props = obs_properties_create();
   auto p = obs_properties_add_list(props, "gpudecoder", obs_module_text("GPUDecoder"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
   obs_property_list_add_string(p, "None", "FFmpeg");
@@ -198,7 +247,7 @@ static obs_properties_t* mdkvideo_properties(void* data)
   return props;
 }
 
-static void mdkvideo_tick(void* data, float seconds)
+static void mdkvideo_tick(void* data, float /*seconds*/)
 {
   auto obj = static_cast<mdkVideoSource*>(data);
 }
@@ -221,22 +270,98 @@ static void mdkvideo_render(void* data, gs_effect_t* effect)
   }
 }
 
+static void mdkvideo_play_pause(void *data, bool pause)
+{
+	auto obj = static_cast<mdkVideoSource *>(data);
+	obj->player_.setState(pause ? State::Paused : State::Playing);
+}
+
+static void mdkvideo_stop(void *data)
+{
+	auto obj = static_cast<mdkVideoSource *>(data);
+	obj->player_.setState(State::Stopped);
+}
+
+static void mdkvideo_restart(void *data)
+{
+	auto obj = static_cast<mdkVideoSource *>(data);
+	obj->player_.setState(State::Playing);
+}
+
+static int64_t mdkvideo_get_duration(void *data)
+{
+	auto obj = static_cast<mdkVideoSource *>(data);
+	return obj->player_.mediaInfo().duration;
+}
+
+static int64_t mdkvideo_get_time(void *data)
+{
+	auto obj = static_cast<mdkVideoSource *>(data);
+	return obj->player_.position();
+}
+
+static void mdkvideo_set_time(void *data, int64_t ms)
+{
+	auto obj = static_cast<mdkVideoSource *>(data);
+	obj->player_.seek(ms);
+}
+
+static enum obs_media_state mdkvideo_get_state(void *data)
+{
+	auto obj = static_cast<mdkVideoSource *>(data);
+	auto s = obj->player_.mediaStatus();
+	if (test_flag(s & MediaStatus::Loading))
+		return OBS_MEDIA_STATE_OPENING;
+	if (test_flag(s & MediaStatus::Buffering))
+		return OBS_MEDIA_STATE_BUFFERING;
+	switch (obj->player_.state()) {
+	case State::Playing:
+		return OBS_MEDIA_STATE_PLAYING;
+	case State::Paused:
+		return OBS_MEDIA_STATE_PAUSED;
+	case State::Stopped:
+		return OBS_MEDIA_STATE_STOPPED;
+	default:
+		break;
+	}
+	return OBS_MEDIA_STATE_NONE;
+}
+
+static void mdkvideo_activate(void *data)
+{
+	mdkvideo_play_pause(data, false);
+}
+
+static void mdkvideo_deactivate(void *data)
+{
+	mdkvideo_play_pause(data, true);
+}
+
 extern "C" void register_mdkvideo()
 {
   static obs_source_info info;
   info.id = "mdkvideo";
   info.type = OBS_SOURCE_TYPE_INPUT;
-  info.output_flags = OBS_SOURCE_VIDEO;// | OBS_SOURCE_CUSTOM_DRAW;
+  info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CONTROLLABLE_MEDIA | OBS_SOURCE_DO_NOT_DUPLICATE; // | OBS_SOURCE_CUSTOM_DRAW;
   info.get_name = mdkvideo_getname;
   info.create = mdkvideo_create;
   info.destroy = mdkvideo_destroy;
   info.update = mdkvideo_update;
   info.video_render = mdkvideo_render;
   //info.video_tick = mdkvideo_tick;
+  info.activate = mdkvideo_activate;
+  info.deactivate = mdkvideo_deactivate;
   info.get_width = mdkvideo_width;
   info.get_height = mdkvideo_height;
   info.get_defaults = mdkvideo_defaults;
   info.get_properties = mdkvideo_properties;
   info.icon_type = OBS_ICON_TYPE_MEDIA;
+  info.media_play_pause = mdkvideo_play_pause;
+  info.media_restart = mdkvideo_restart;
+  info.media_stop = mdkvideo_stop;
+  info.media_get_duration = mdkvideo_get_duration;
+  info.media_get_time = mdkvideo_get_time;
+  info.media_set_time = mdkvideo_set_time;
+  info.media_get_state = mdkvideo_get_state;
   obs_register_source(&info);
 }
