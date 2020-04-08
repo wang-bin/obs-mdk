@@ -237,5 +237,6 @@ extern "C" void register_mdkvideo()
   info.get_height = mdkvideo_height;
   info.get_defaults = mdkvideo_defaults;
   info.get_properties = mdkvideo_properties;
+  info.icon_type = OBS_ICON_TYPE_MEDIA;
   obs_register_source(&info);
 }
