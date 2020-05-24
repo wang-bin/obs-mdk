@@ -138,14 +138,14 @@ public:
 		  return;
 	  }
 	  auto it = find(urls_.cbegin(), urls_.cend(), now);
+	  if (it != urls_.cend())
+		  next_it_ = ++it;
 	  if (it == urls_.cend()) {
 		  if (!loop_) {
 			  player_.setNextMedia(nullptr);
 			  return;
 		  }
 		  next_it_ = urls_.cbegin();
-	  } else {
-		  next_it_ = ++it;
 	  }
 	  player_.setNextMedia(next_it_->data());
   }
