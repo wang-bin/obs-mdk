@@ -169,14 +169,8 @@ private:
 #ifdef _WIN32
     if (gs_get_device_type() == GS_DEVICE_DIRECT3D_11) {
       flip_ = 0;
-      tex11_ = (ID3D11Texture2D*)gs_texture_get_obj(tex_);
-      ComPtr<ID3D11Device> dev11;
-      tex11_->GetDevice(&dev11);
-      MS_ENSURE(dev11->CreateRenderTargetView(tex11_.Get(), nullptr, &rtv11_), nullptr);
-      dev11->GetImmediateContext(&ctx11_);
       D3D11RenderAPI ra;
-      ra.context = ctx11_.Get();
-      ra.rtv = rtv11_.Get();
+      ra.rtv = (ID3D11Texture2D *)gs_texture_get_obj(tex_);
       player_.setRenderAPI(&ra);
     }
 #endif
@@ -221,11 +215,6 @@ private:
   uint32_t w_ = 0;
   uint32_t h_ = 0;
 
-#ifdef _WIN32
-  ComPtr<ID3D11DeviceContext> ctx11_;
-  ComPtr<ID3D11Texture2D> tex11_;
-  ComPtr<ID3D11RenderTargetView> rtv11_;
-#endif
   MediaStatus status_;
 
   obs_hotkey_id play_pause_hotkey;
