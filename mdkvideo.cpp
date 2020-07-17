@@ -49,9 +49,21 @@ class mdkVideoSource {
 public:
   mdkVideoSource(obs_source_t* src) : source_(src) {
 	  next_it_ = urls_.cend();
-    setLogHandler([](LogLevel, const char* msg) {
-      blog(LOG_INFO, "%s", msg);
-      });
+	  setLogHandler([](LogLevel level, const char *msg) {
+		  int lv = LOG_DEBUG;
+		  switch (level) {
+		  case LogLevel::Info:
+			  lv = LOG_INFO;
+			  break;
+		  case LogLevel::Warning:
+			  lv = LOG_WARNING;
+			  break;
+		  case LogLevel::Error:
+			  lv = LOG_ERROR;
+			  break;
+		  }
+		  blog(lv, "%s", msg);
+	  });
     player_.onMediaStatusChanged([this](MediaStatus s) {
       if (flags_added(status_, s, MediaStatus::Loaded)) {
         auto info = player_.mediaInfo();
@@ -93,7 +105,7 @@ public:
   }
 
   ~mdkVideoSource() {
-    setLogHandler(nullptr);
+    setLogHandler(nullptr); // TODO: in module unload
 
     obs_enter_graphics();
     gs_texrender_destroy(texrender_);
