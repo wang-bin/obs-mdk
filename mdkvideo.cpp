@@ -9,6 +9,7 @@ using namespace Microsoft::WRL; //ComPtr
 #include "mdk/Player.h"
 using namespace MDK_NS;
 #include <list>
+#include <regex>
 using namespace std;
 
 #define S_PLAYLIST "playlist"
@@ -183,7 +184,7 @@ private:
 #ifdef _WIN32
     if (gs_get_device_type() == GS_DEVICE_DIRECT3D_11) {
       flip_ = 0;
-      D3D11RenderAPI ra;
+      D3D11RenderAPI ra{};
       ra.rtv = (ID3D11Texture2D *)gs_texture_get_obj(tex_);
       player_.setRenderAPI(&ra);
     }
@@ -258,8 +259,12 @@ static void mdkvideo_update(void* data, obs_data_t* settings)
     speed_percent = 100;
   //obj->player_.setLoop(loop ? -1 : 0);
   obj->player_.setPlaybackRate(float(speed_percent) / 100.0f);
-  auto dec = obs_data_get_string(settings, "gpudecoder");
-  obj->player_.setDecoders(MediaType::Video, { dec, "FFmpeg" });
+  string dec = obs_data_get_string(settings, "hwdecoder");
+  std::regex re(",");
+  std::sregex_token_iterator first{dec.begin(), dec.end(), re, -1}, last;
+  vector<string> decs = { first, last };
+  decs.insert(decs.end(), { "hap", "FFmpeg", "dav1d" });
+  obj->player_.setDecoders(MediaType::Video, decs);
 
   auto urls = obs_data_get_array(settings, S_PLAYLIST);
   auto nb_urls = obs_data_array_count(urls);
@@ -319,16 +324,19 @@ static void mdkvideo_defaults(obs_data_t* settings)
 static obs_properties_t* mdkvideo_properties(void*)
 {
   auto* props = obs_properties_create();
-  auto p = obs_properties_add_list(props, "gpudecoder", obs_module_text("GPUDecoder"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-  obs_property_list_add_string(p, "None", "FFmpeg");
+  auto p = obs_properties_add_list(props, "hwdecoder", obs_module_text("HWDecoder"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+  obs_property_list_add_string(p, "Auto",
 #if defined(_WIN32)
+      "MFT:d3d=11,D3D11,CUDA");
   obs_property_list_add_string(p, "D3D11 via MFT", "MFT:d3d=11");
-  obs_property_list_add_string(p, "DXVA via MFT", "MFT:d3d=11");
+  obs_property_list_add_string(p, "D3D12 via MFT", "MFT:d3d=12");
   obs_property_list_add_string(p, "D3D11", "D3D11");
-  obs_property_list_add_string(p, "DXVA", "DXVA");
 #elif defined(__APPLE__)
+    "VT");
   obs_property_list_add_string(p, "VT", "VT");
+  obs_property_list_add_string(p, "VideoToolbox", "VideoToolbox");
 #else
+    "VAAPI,VDPAU,CUDA");
   obs_property_list_add_string(p, "VA-API", "VAAPI");
   obs_property_list_add_string(p, "VDPAU", "VDPAU");
 #endif
@@ -336,6 +344,7 @@ static obs_properties_t* mdkvideo_properties(void*)
   obs_property_list_add_string(p, "CUDA", "CUDA");
   obs_property_list_add_string(p, "NVDEC", "NVDEC");
 #endif
+  obs_property_list_add_string(p, "None", "FFmpeg");
   //obs_properties_add_path(props, "local_file", obs_module_text("LocalFile"), OBS_PATH_FILE, nullptr, nullptr);
   obs_properties_add_bool(props, "looping", obs_module_text("Looping"));
   auto prop = obs_properties_add_int_slider(props, "speed_percent", obs_module_text("SpeedPercentage"), 1, kMaxSpeedPercent, 1);
