@@ -24,6 +24,9 @@ add_library(obs-mdk MODULE
 	)
 add_library(OBS::mdk ALIAS obs-mdk)
 
+if(APPLE)
+  target_compile_options(obs-mdk PRIVATE -Wno-quoted-include-in-framework-header -Wno-newline-eof)
+endif()
 target_link_libraries(obs-mdk
 	libobs
 	mdk
