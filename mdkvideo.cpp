@@ -61,6 +61,8 @@ public:
 		  case LogLevel::Error:
 			  lv = LOG_ERROR;
 			  break;
+          default:
+              break;
 		  }
 		  blog(lv, "%s", msg);
 	  });
@@ -122,11 +124,11 @@ public:
 
   void play(const char* url) {
     player_.setNextMedia(nullptr);
-    player_.setState(State::Stopped);
+    player_.set(State::Stopped);
     player_.waitFor(State::Stopped);
     player_.setMedia(nullptr); // 1st url may be the same as current url
     player_.setMedia(url);
-    player_.setState(State::Playing);
+    player_.set(State::Playing);
   }
 
   uint32_t width() const { return w_; }
@@ -190,7 +192,7 @@ private:
     return true;
   }
 
-  
+
   static void hotkeyPlayPause(void *data, obs_hotkey_id, obs_hotkey_t *, bool pressed)
   {
 	  auto c = static_cast<mdkVideoSource *>(data);
@@ -257,7 +259,7 @@ static void mdkvideo_update(void* data, obs_data_t* settings)
   //obj->player_.setLoop(loop ? -1 : 0);
   obj->player_.setPlaybackRate(float(speed_percent) / 100.0f);
   auto dec = obs_data_get_string(settings, "gpudecoder");
-  obj->player_.setVideoDecoders({ dec, "FFmpeg" });
+  obj->player_.setDecoders(MediaType::Video, { dec, "FFmpeg" });
 
   auto urls = obs_data_get_array(settings, S_PLAYLIST);
   auto nb_urls = obs_data_array_count(urls);
@@ -314,7 +316,7 @@ static void mdkvideo_defaults(obs_data_t* settings)
   obs_data_set_default_int(settings, "speed_percent", 100);
 }
 
-static obs_properties_t* mdkvideo_properties(void* data)
+static obs_properties_t* mdkvideo_properties(void*)
 {
   auto* props = obs_properties_create();
   auto p = obs_properties_add_list(props, "gpudecoder", obs_module_text("GPUDecoder"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
@@ -325,13 +327,15 @@ static obs_properties_t* mdkvideo_properties(void* data)
   obs_property_list_add_string(p, "D3D11", "D3D11");
   obs_property_list_add_string(p, "DXVA", "DXVA");
 #elif defined(__APPLE__)
-  obs_property_list_add_string(p, "VideoToolbox", "VideoToolbox");
+  obs_property_list_add_string(p, "VT", "VT");
 #else
   obs_property_list_add_string(p, "VA-API", "VAAPI");
   obs_property_list_add_string(p, "VDPAU", "VDPAU");
 #endif
+#if !(__APPLE__+0)
   obs_property_list_add_string(p, "CUDA", "CUDA");
   obs_property_list_add_string(p, "NVDEC", "NVDEC");
+#endif
   //obs_properties_add_path(props, "local_file", obs_module_text("LocalFile"), OBS_PATH_FILE, nullptr, nullptr);
   obs_properties_add_bool(props, "looping", obs_module_text("Looping"));
   auto prop = obs_properties_add_int_slider(props, "speed_percent", obs_module_text("SpeedPercentage"), 1, kMaxSpeedPercent, 1);
@@ -344,10 +348,12 @@ static obs_properties_t* mdkvideo_properties(void* data)
   return props;
 }
 
+#if 0
 static void mdkvideo_tick(void* data, float /*seconds*/)
 {
   auto obj = static_cast<mdkVideoSource*>(data);
 }
+#endif
 
 static void mdkvideo_render(void* data, gs_effect_t* effect)
 {
@@ -370,20 +376,20 @@ static void mdkvideo_render(void* data, gs_effect_t* effect)
 static void mdkvideo_play_pause(void *data, bool pause)
 {
 	auto obj = static_cast<mdkVideoSource *>(data);
-	obj->player_.setState(pause ? State::Paused : State::Playing);
+	obj->player_.set(pause ? State::Paused : State::Playing);
 }
 
 static void mdkvideo_stop(void *data)
 {
 	auto obj = static_cast<mdkVideoSource *>(data);
 	obj->player_.setNextMedia(nullptr);
-	obj->player_.setState(State::Stopped);
+	obj->player_.set(State::Stopped);
 }
 
 static void mdkvideo_restart(void *data)
 {
 	auto obj = static_cast<mdkVideoSource *>(data);
-	obj->player_.setState(State::Playing);
+	obj->player_.set(State::Playing);
 }
 
 static int64_t mdkvideo_get_duration(void *data)
