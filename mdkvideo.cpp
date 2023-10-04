@@ -67,16 +67,15 @@ public:
 		  }
 		  blog(lv, "%s", msg);
 	  });
-    player_.onMediaStatusChanged([this](MediaStatus s) {
-      if (flags_added(status_, s, MediaStatus::Loaded)) {
-        auto info = player_.mediaInfo();
-        w_ = info.video[0].codec.width;
-        h_ = info.video[0].codec.height;
-	obs_source_media_started(source_);
+    player_.onMediaStatus([this](MediaStatus oldValue, MediaStatus newValue) {
+      if (flags_added(oldValue, newValue, MediaStatus::Loaded)) {
+        const auto codec = player_.mediaInfo().video[0].codec;
+        w_ = codec.width;
+        h_ = codec.height;
+	    obs_source_media_started(source_);
       }
-      status_ = s;
       return true;
-      });
+    });
     player_.currentMediaChanged([this] {
 	    if (!player_.url())
 		    return;
@@ -229,8 +228,6 @@ private:
   uint32_t flip_ = GS_FLIP_V;
   uint32_t w_ = 0;
   uint32_t h_ = 0;
-
-  MediaStatus status_;
 
   obs_hotkey_id play_pause_hotkey;
   obs_hotkey_id restart_hotkey;
