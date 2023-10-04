@@ -32,6 +32,10 @@ target_link_libraries(obs-mdk
 	mdk
 	)
 
+if(EXISTS ${MDK_FRAMEWORK})
+    set_property(GLOBAL APPEND PROPERTY _OBS_FRAMEWORKS ${MDK_FRAMEWORK})
+endif()
+
 if(NOT ${CMAKE_PROJECT_NAME} STREQUAL ${PROJECT_NAME})
   if(COMMAND legacy_check)
     legacy_check()
