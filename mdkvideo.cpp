@@ -166,6 +166,10 @@ public:
 
   Player player_;
 private:
+#ifdef _WIN32
+  ComPtr<ID3D11RenderTargetView> rtv_;
+#endif
+
   bool ensureRTV() {
     if (w_ <= 0 || h_ <= 0)
       return false;
@@ -184,7 +188,14 @@ private:
     if (gs_get_device_type() == GS_DEVICE_DIRECT3D_11) {
       flip_ = 0;
       D3D11RenderAPI ra{};
-      ra.rtv = (ID3D11Texture2D *)gs_texture_get_obj(tex_);
+      auto tex11 = (ID3D11Texture2D *)gs_texture_get_obj(tex_);
+      ComPtr<ID3D11Device> dev;
+      tex11->GetDevice(&dev);
+      D3D11_RENDER_TARGET_VIEW_DESC rtvd{};
+      rtvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // TODO: why rtvdesc can't be null since obs27(support srgb)?
+      rtvd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+      MS_ENSURE(dev->CreateRenderTargetView(tex11, &rtvd, &rtv_), false);
+      ra.rtv = rtv_.Get();
       player_.setRenderAPI(&ra);
     }
 #endif
