@@ -140,21 +140,22 @@ public:
 	  loop_ = loop;
 	  urls_ = urls;
 	  player_.setNextMedia(nullptr);
-	  if (urls_.empty())
+	  if (urls_.empty()) {
+	    player_.set(State::Stopped);
 		  return;
+    }
 	  string next;
 	  auto now = player_.url();
-	  if (!now) {
+  	auto it = now ? find(urls_.cbegin(), urls_.cend(), now) : urls_.cend();
+	  if (!now || it == urls_.cend()) {
 		  next_it_ = urls_.cbegin();
 		  if (++next_it_ == urls_.cend() && loop_)
 			  next_it_ = urls_.cbegin();
 		  play(urls_.front().data());
 		  return;
 	  }
-	  auto it = find(urls_.cbegin(), urls_.cend(), now);
-	  if (it != urls_.cend())
-		  next_it_ = ++it;
-	  if (it == urls_.cend()) {
+	  next_it_ = ++it;
+    if (it == urls_.cend()) {
 		  if (!loop_) {
 			  player_.setNextMedia(nullptr);
 			  return;
