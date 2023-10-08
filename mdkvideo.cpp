@@ -267,10 +267,29 @@ static void mdkvideo_update(void* data, obs_data_t* settings)
     speed_percent = 100;
   //obj->player_.setLoop(loop ? -1 : 0);
   obj->player_.setPlaybackRate(float(speed_percent) / 100.0f);
+
+  auto adapter = obs_data_get_int(settings, "device");
+  if (adapter < 0) {
+    obs_video_info ovi;
+    if (obs_get_video_info(&ovi)) {
+	adapter = ovi.adapter;
+    }
+  }
+
   string dec = obs_data_get_string(settings, "hwdecoder");
   std::regex re(",");
   std::sregex_token_iterator first{dec.begin(), dec.end(), re, -1}, last;
   vector<string> decs = { first, last };
+  if (adapter >= 0) {
+    for (auto &dec : decs) {
+	if (dec.find("MFT") == 0) {
+			  dec += ":adapter=" + to_string(adapter);
+	}
+	if (dec.find("D3D") == 0) {
+			  dec += ":hwdevice=" + to_string(adapter);
+	}
+    }
+  }
   decs.insert(decs.end(), { "hap", "FFmpeg", "dav1d" });
   obj->player_.setDecoders(MediaType::Video, decs);
 
@@ -327,13 +346,35 @@ static void mdkvideo_defaults(obs_data_t* settings)
 {
   obs_data_set_default_bool(settings, "looping", true);
   obs_data_set_default_int(settings, "speed_percent", 100);
+  obs_data_set_default_int(settings, "device", -1);
 }
 
 static obs_properties_t* mdkvideo_properties(void*)
 {
   auto* props = obs_properties_create();
-  auto p = obs_properties_add_list(props, "hwdecoder", obs_module_text("HWDecoder"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-  obs_property_list_add_string(p, "Auto",
+  obs_property_t* p = nullptr;
+#if defined(_WIN32)
+  p = obs_properties_add_list(props, "device",
+				   obs_module_text("DecodeDevice"),
+				   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+  obs_property_list_add_int(p, obs_module_text("SameAsRenderer"), -1);
+  obs_enter_graphics();
+
+  obs_video_info ovi;
+  if (obs_get_video_info(&ovi)) {
+  }
+  gs_enum_adapters(
+	  [](void *param, const char *name, uint32_t id) {
+		  auto p = (obs_property_t *)param;
+		  obs_property_list_add_int(p, name,
+					       id);
+		  return true;
+	  },
+	  p);
+  obs_leave_graphics();
+#endif
+  p = obs_properties_add_list(props, "hwdecoder", obs_module_text("HWDecoder"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+  obs_property_list_add_string(p, obs_module_text("Auto"),
 #if defined(_WIN32)
       "MFT:d3d=11,D3D11,CUDA");
   obs_property_list_add_string(p, "D3D11 via MFT", "MFT:d3d=11");
