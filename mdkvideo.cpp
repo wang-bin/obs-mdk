@@ -1,3 +1,7 @@
+/*
+  Copyright 2019 - 2023, WangBin wbsecg1 at gmail dot com and the obs-mdk contributors
+  SPDX-License-Identifier: MIT
+*/
 #include <obs-module.h>
 #include <util/platform.h>
 #ifdef _WIN32
@@ -46,6 +50,28 @@ using namespace std;
     } while (false)
 
 constexpr int kMaxSpeedPercent = 400;
+
+auto from_obs(gs_color_space cs) {
+    switch (cs)
+    {
+    case GS_CS_709_EXTENDED:
+    case GS_CS_709_SCRGB:
+        return ColorSpaceSCRGB;
+    default:
+        return ColorSpaceBT709;
+    }
+}
+
+auto get_cs(const obs_video_info* ovi) {
+	switch (ovi->colorspace) {
+	case VIDEO_CS_2100_PQ:
+	case VIDEO_CS_2100_HLG:
+		return GS_CS_709_EXTENDED;
+	default:
+		return GS_CS_SRGB;
+	}
+}
+
 class mdkVideoSource {
 public:
   mdkVideoSource(obs_source_t* src) : source_(src) {
@@ -170,10 +196,23 @@ private:
 #ifdef _WIN32
   ComPtr<ID3D11RenderTargetView> rtv_;
 #endif
+  gs_color_space cs_ = GS_CS_SRGB;
 
   bool ensureRTV() {
     if (w_ <= 0 || h_ <= 0)
       return false;
+    auto cs = gs_get_color_space(); // gs, not user settings
+    obs_video_info ovi;
+    if (obs_get_video_info(&ovi)) { // can be changed in settings dialog
+        cs = get_cs(&ovi);
+    }
+    if (cs != cs_)
+        player_.set(from_obs(cs));
+    const auto format = gs_get_format_from_space(cs);
+    if (gs_texrender_get_format(texrender_) != format) {
+        gs_texrender_destroy(texrender_);
+        texrender_ = gs_texrender_create(format, GS_ZS_NONE);
+    }
     gs_texrender_reset(texrender_);
     if (!gs_texrender_begin(texrender_, w_, h_)) {
       blog(LOG_ERROR, "failed to begin texrender");
@@ -192,8 +231,13 @@ private:
       auto tex11 = (ID3D11Texture2D *)gs_texture_get_obj(tex_);
       ComPtr<ID3D11Device> dev;
       tex11->GetDevice(&dev);
+      D3D11_TEXTURE2D_DESC td;
+      tex11->GetDesc(&td);
       D3D11_RENDER_TARGET_VIEW_DESC rtvd{};
-      rtvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // TODO: why rtvdesc can't be null since obs27(support srgb)?
+      rtvd.Format = td.Format; // rtvdesc can't be null since obs27(support srgb) because it's typeless format for GS_RGBA since 66259560
+      if (td.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS) {
+	    rtvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+      }
       rtvd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
       MS_ENSURE(dev->CreateRenderTargetView(tex11, &rtvd, &rtv_), false);
       ra.rtv = rtv_.Get();
@@ -201,6 +245,7 @@ private:
     }
 #endif
     player_.setVideoSurfaceSize(w_, h_);
+    player_.set(from_obs(cs));
     return true;
   }
 
@@ -236,7 +281,7 @@ private:
   obs_source_t *source_ = nullptr;
   gs_texture_t *tex_ = nullptr;
   // required by opengl. d3d11 can simply use a texture as rtv, but opengl needs gl api calls here, which is not trival to support all cases because glx or egl used by obs is unknown(mdk does know that)
-  gs_texrender_t* texrender_ = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+  gs_texrender_t* texrender_ = gs_texrender_create(GS_RGBA, GS_ZS_NONE); // rgb16f: pq, hlg trc, or 10bit source
   uint32_t flip_ = GS_FLIP_V;
   uint32_t w_ = 0;
   uint32_t h_ = 0;
@@ -273,7 +318,7 @@ static void mdkvideo_update(void* data, obs_data_t* settings)
   if (adapter < 0) {
     obs_video_info ovi;
     if (obs_get_video_info(&ovi)) {
-	adapter = ovi.adapter;
+	    adapter = ovi.adapter;
     }
   }
 
@@ -420,16 +465,30 @@ static void mdkvideo_render(void* data, gs_effect_t* effect)
   auto tex = obj->render();
   if (!tex)
     return;
+  const bool linear_srgb = gs_get_linear_srgb();
+  const bool previous = gs_framebuffer_srgb_enabled();
+  gs_enable_framebuffer_srgb(linear_srgb);
+
   if (effect) { // if no OBS_SOURCE_CUSTOM_DRAW
-    gs_effect_set_texture(gs_effect_get_param_by_name(effect, "image"), tex);
+    gs_eparam_t *image = gs_effect_get_param_by_name(effect, "image");
+    if (linear_srgb) {
+        gs_effect_set_texture_srgb(image, tex);
+    } else {
+        gs_effect_set_texture(image, tex);
+    }
     gs_draw_sprite(tex, obj->flip(), obj->width(), obj->height());
   } else {
     effect = obs_get_base_effect(OBS_EFFECT_OPAQUE);
     gs_eparam_t *image =gs_effect_get_param_by_name(effect, "image");
-    gs_effect_set_texture(image, tex);
+    if (linear_srgb) {
+        gs_effect_set_texture_srgb(image, tex);
+    } else {
+        gs_effect_set_texture(image, tex);
+    }
     while (gs_effect_loop(effect, "Draw"))
       gs_draw_sprite(tex, obj->flip(), 0, 0);
   }
+  gs_enable_framebuffer_srgb(previous);
 }
 
 static void mdkvideo_play_pause(void *data, bool pause)
@@ -500,12 +559,34 @@ static void mdkvideo_deactivate(void *data)
 	mdkvideo_play_pause(data, true);
 }
 
+enum gs_color_space
+mdkvideo_get_color_space(void *data, size_t count,
+			    const enum gs_color_space *preferred_spaces)
+{
+	UNUSED_PARAMETER(data);
+	UNUSED_PARAMETER(count);
+	UNUSED_PARAMETER(preferred_spaces);
+
+	enum gs_color_space space = GS_CS_SRGB;
+	struct obs_video_info ovi;
+	if (obs_get_video_info(&ovi)) {
+		if (ovi.colorspace == VIDEO_CS_2100_PQ ||
+		    ovi.colorspace == VIDEO_CS_2100_HLG)
+			space = GS_CS_709_EXTENDED;
+	}
+
+	return space;
+}
+
 extern "C" void register_mdkvideo()
 {
   static obs_source_info info;
   info.id = "mdkvideo";
   info.type = OBS_SOURCE_TYPE_INPUT;
-  info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CONTROLLABLE_MEDIA | OBS_SOURCE_DO_NOT_DUPLICATE; // | OBS_SOURCE_CUSTOM_DRAW;
+  info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CONTROLLABLE_MEDIA | OBS_SOURCE_DO_NOT_DUPLICATE
+    | OBS_SOURCE_SRGB // for gs_get_linear_srgb()
+   // | OBS_SOURCE_CUSTOM_DRAW
+  ;
   info.get_name = mdkvideo_getname;
   info.create = mdkvideo_create;
   info.destroy = mdkvideo_destroy;
@@ -526,5 +607,6 @@ extern "C" void register_mdkvideo()
   info.media_get_time = mdkvideo_get_time;
   info.media_set_time = mdkvideo_set_time;
   info.media_get_state = mdkvideo_get_state;
+  info.video_get_color_space = mdkvideo_get_color_space;
   obs_register_source(&info);
 }

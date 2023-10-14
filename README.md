@@ -4,6 +4,7 @@ Features
 - Best performance: hardware decoding and rendering for all platforms
 - Playlist
 - Playback control via hotkey(Settings=>Hotkeys=>MDKVideo)
+- HDR display
 
 NOTE: to use OpenGL renderer on windows, libEGL.dll and libGLESv2.dll in obs-plugins must be deleted
 
