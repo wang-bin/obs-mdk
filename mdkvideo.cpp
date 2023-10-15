@@ -149,6 +149,7 @@ public:
   }
 
   void play(const char* url) {
+    SetGlobalOption("sdr.white", obs_get_video_sdr_white_level());
     player_.setNextMedia(nullptr);
     player_.set(State::Stopped);
     player_.waitFor(State::Stopped);
@@ -506,6 +507,7 @@ static void mdkvideo_stop(void *data)
 
 static void mdkvideo_restart(void *data)
 {
+    SetGlobalOption("sdr.white", obs_get_video_sdr_white_level());
 	auto obj = static_cast<mdkVideoSource *>(data);
 	obj->player_.set(State::Playing);
 }
