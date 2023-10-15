@@ -158,6 +158,11 @@ public:
     player_.set(State::Playing);
   }
 
+  void restart() {
+    player_.setMedia(nullptr);
+    setUrls(urls_, loop_);
+  }
+
   uint32_t width() const { return w_; }
   uint32_t height() const { return h_; }
   uint32_t flip() const { return flip_; }
@@ -167,10 +172,10 @@ public:
 	  loop_ = loop;
 	  urls_ = urls;
 	  player_.setNextMedia(nullptr);
-	  if (urls_.empty()) {
+      if (urls_.empty()) {
 	    player_.set(State::Stopped);
-		  return;
-    }
+        return;
+      }
 	  string next;
 	  auto now = player_.url();
   	auto it = now ? find(urls_.cbegin(), urls_.cend(), now) : urls_.cend();
@@ -509,7 +514,7 @@ static void mdkvideo_restart(void *data)
 {
     SetGlobalOption("sdr.white", obs_get_video_sdr_white_level());
 	auto obj = static_cast<mdkVideoSource *>(data);
-	obj->player_.set(State::Playing);
+	obj->restart();
 }
 
 static int64_t mdkvideo_get_duration(void *data)
