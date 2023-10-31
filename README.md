@@ -1,4 +1,4 @@
-A Video Playback Plugin for OBS Studio. Based on [mdk-sdk](https://github.com/wang-bin/mdk-sdk)
+A Video Playback Plugin for OBS Studio. Based on [libmdk](https://github.com/wang-bin/mdk-sdk). [Download the latest prebuilt plugins for windows](https://sourceforge.net/projects/mdk-sdk/files/obs-plugin/)
 
 Features
 - Best performance: hardware decoding and rendering for all platforms
