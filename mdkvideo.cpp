@@ -55,6 +55,7 @@ auto from_obs(gs_color_space cs) {
     switch (cs)
     {
     case GS_CS_709_EXTENDED:
+        return ColorSpaceExtendedLinearSRGB;
     case GS_CS_709_SCRGB:
         return ColorSpaceSCRGB;
     default:
@@ -220,7 +221,7 @@ private:
         texrender_ = gs_texrender_create(format, GS_ZS_NONE);
     }
     gs_texrender_reset(texrender_);
-    if (!gs_texrender_begin(texrender_, w_, h_)) {
+    if (!gs_texrender_begin_with_color_space(texrender_, w_, h_, cs)) {
       blog(LOG_ERROR, "failed to begin texrender");
       return false;
     }
@@ -577,9 +578,7 @@ mdkvideo_get_color_space(void *data, size_t count,
 	enum gs_color_space space = GS_CS_SRGB;
 	struct obs_video_info ovi;
 	if (obs_get_video_info(&ovi)) {
-		if (ovi.colorspace == VIDEO_CS_2100_PQ ||
-		    ovi.colorspace == VIDEO_CS_2100_HLG)
-			space = GS_CS_709_EXTENDED;
+		space = get_cs(&ovi);
 	}
 
 	return space;
