@@ -1,5 +1,5 @@
 /*
-  Copyright 2019 - 2023, WangBin wbsecg1 at gmail dot com and the obs-mdk contributors
+  Copyright 2019 - 2025, WangBin wbsecg1 at gmail dot com and the obs-mdk contributors
   SPDX-License-Identifier: MIT
 */
 #include <obs-module.h>
@@ -11,6 +11,9 @@
 using namespace Microsoft::WRL; //ComPtr
 #endif
 #include "mdk/Player.h"
+#if __has_include("mdk/AudioFrame.h")
+# define HAS_ON_AUDIO 1
+#endif
 using namespace MDK_NS;
 #include <list>
 #include <regex>
@@ -73,6 +76,55 @@ auto get_cs(const obs_video_info* ovi) {
 	}
 }
 
+static inline enum audio_format convert_sample_format(SampleFormat f)
+{
+	switch (f) {
+	case SampleFormat::U8:
+		return AUDIO_FORMAT_U8BIT;
+	case SampleFormat::S16:
+		return AUDIO_FORMAT_16BIT;
+	case SampleFormat::S32:
+		return AUDIO_FORMAT_32BIT;
+	case SampleFormat::F32:
+		return AUDIO_FORMAT_FLOAT;
+	case SampleFormat::U8P:
+		return AUDIO_FORMAT_U8BIT_PLANAR;
+	case SampleFormat::S16P:
+		return AUDIO_FORMAT_16BIT_PLANAR;
+	case SampleFormat::S32P:
+		return AUDIO_FORMAT_32BIT_PLANAR;
+	case SampleFormat::F32P:
+		return AUDIO_FORMAT_FLOAT_PLANAR;
+	default:;
+	}
+
+	return AUDIO_FORMAT_UNKNOWN;
+}
+
+static inline enum speaker_layout convert_speaker_layout(uint8_t channels)
+{
+    switch (channels) {
+	case 0:
+		return SPEAKERS_UNKNOWN;
+	case 1:
+		return SPEAKERS_MONO;
+	case 2:
+		return SPEAKERS_STEREO;
+	case 3:
+		return SPEAKERS_2POINT1;
+	case 4:
+		return SPEAKERS_4POINT0;
+	case 5:
+		return SPEAKERS_4POINT1;
+	case 6:
+		return SPEAKERS_5POINT1;
+	case 8:
+		return SPEAKERS_7POINT1;
+	default:
+		return SPEAKERS_UNKNOWN;
+	}
+}
+
 class mdkVideoSource {
 public:
   mdkVideoSource(obs_source_t* src) : source_(src) {
@@ -120,6 +172,28 @@ public:
 			obs_source_media_stop(source_);
 	});
 
+#if (HAS_ON_AUDIO + 0)
+    player_.setMute(true);
+	player_.onFrame<AudioFrame>([this](AudioFrame &f, int track) {
+		if (!f || f.timestamp() == TimestampEOS)
+			return 0;
+		struct obs_source_audio audio = {};
+		const auto planes = f.planeCount();
+		for (int i = 0; i < planes; i++)
+			audio.data[i] = f.bufferData(i);
+
+		audio.samples_per_sec = f.sampleRate();
+		audio.speakers = convert_speaker_layout(f.channels());
+		audio.format = convert_sample_format(f.format());
+		audio.frames = f.samplesPerChannel();
+		audio.timestamp = uint64_t(f.timestamp() * 1000000000);
+
+		if (audio.format == AUDIO_FORMAT_UNKNOWN)
+			return 0;
+		obs_source_output_audio(source_, &audio);
+		return 0;
+	});
+#endif // (HAS_ON_AUDIO + 0)
 	play_pause_hotkey = obs_hotkey_register_source(
 		source_, "MDKVideoSource.PlayPause", obs_module_text("PlayPause"),
 		hotkeyPlayPause, this);
@@ -590,6 +664,7 @@ extern "C" void register_mdkvideo()
   info.id = "mdkvideo";
   info.type = OBS_SOURCE_TYPE_INPUT;
   info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CONTROLLABLE_MEDIA | OBS_SOURCE_DO_NOT_DUPLICATE
+	| OBS_SOURCE_AUDIO
     | OBS_SOURCE_SRGB // for gs_get_linear_srgb()
    // | OBS_SOURCE_CUSTOM_DRAW
   ;
