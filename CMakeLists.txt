@@ -47,6 +47,23 @@ if(NOT ${CMAKE_PROJECT_NAME} STREQUAL ${PROJECT_NAME})
     set_target_properties_obs(${PROJECT_NAME} PROPERTIES FOLDER plugins/${PROJECT_NAME} PREFIX "")
   endif()
 # cmake-format: on
+
+  add_custom_command(
+    TARGET ${PROJECT_NAME}
+    POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E echo "Add libmdk to destination"
+    COMMAND
+      "${CMAKE_COMMAND}" -E copy_if_different "${MDK_RUNTIME}" "${MDK_LIBASS}"
+      "${OBS_OUTPUT_DIR}/$<CONFIG>/${OBS_PLUGIN_DESTINATION}"
+    COMMENT ""
+  )
+  install(
+    FILES
+      "${MDK_RUNTIME}"
+      "${MDK_LIBASS}"
+    DESTINATION "${OBS_PLUGIN_DESTINATION}"
+    COMPONENT Runtime
+  )
 elseif(EXISTS ${LIBOBS_PLUGIN_DESTINATION}) # linux
   install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION ${LIBOBS_PLUGIN_DESTINATION}
